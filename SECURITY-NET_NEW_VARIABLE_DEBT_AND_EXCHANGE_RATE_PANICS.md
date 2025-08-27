@@ -68,6 +68,34 @@ overflow-checks = true
 Impact mechanics:
 - If `new_debt_f - previous_debt_f < fixed_host_fee`, then `new_debt_f - previous_debt_f - fixed_host_fee` underflows the unsigned fixed type, triggering a panic (transaction abort) due to overflow checks. There is no clamp/require around this subtraction.
 - This occurs before any capping logic for referrer payouts in `lending_operations.rs`, so the entire accrual/refresh fails for the slot.
+- Cross-file call sites that hit this path first:
+```96:104,190:196:programs/klend/src/handlers/handler_repay_and_withdraw_redeem.rs
+lending_operations::refresh_reserve(...)?
+```
+```32:36:programs/klend/src/handlers/handler_update_reserve_config.rs
+lending_operations::refresh_reserve(reserve, &clock, None, market.referral_fee_bps)?;
+```
+```94:97:programs/klend/src/handlers/handler_deposit_reserve_liquidity_and_obligation_collateral.rs
+lending_operations::refresh_reserve(reserve, &clock, None, lending_market.referral_fee_bps)?;
+```
+```27:33:programs/klend/src/handlers/handler_flash_borrow_reserve_liquidity.rs
+lending_operations::refresh_reserve(reserve, &Clock::get()?, None, lending_market.referral_fee_bps)?;
+```
+```47:51:programs/klend/src/handlers/handler_refresh_reserve.rs
+lending_operations::refresh_reserve(reserve, clock, price_res, lending_market.referral_fee_bps)?;
+```
+```36:45,75:82:programs/klend/src/handlers/handler_deposit_and_withdraw.rs
+refresh_reserve(&mut reserve, &clock, None, lending_market.referral_fee_bps)?;
+```
+```61:66:programs/klend/src/handlers/handler_deposit_obligation_collateral.rs
+lending_operations::refresh_reserve(deposit_reserve, &clock, None, lending_market.referral_fee_bps)?;
+```
+```47:49:programs/klend/src/handlers/handler_redeem_reserve_collateral.rs
+lending_operations::refresh_reserve(reserve, &clock, None, lending_market.referral_fee_bps)?;
+```
+```44:45:programs/klend/src/handlers/handler_deposit_reserve_liquidity.rs
+refresh_reserve(reserve, &clock, None, lending_market.referral_fee_bps)?;
+```
 
 What this is NOT:
 - It does NOT silently reduce protocol fees or create negative values on-chain; the program aborts before writing state.
@@ -149,6 +177,12 @@ pub fn compute_depositable_amount_and_minted_collateral(&self, liquidity_amount:
 }
 ```
 - Redeem and other operations also reach these conversion paths.
+ - Cross-file uses include computing max redeemable collateral from available liquidity:
+```1562:1565:programs/klend/src/lending_market/lending_operations.rs
+let collateral_exchange_rate = withdraw_reserve_ref_mut.collateral_exchange_rate();
+let max_redeemable_collateral = collateral_exchange_rate
+    .liquidity_to_collateral(withdraw_reserve_ref_mut.liquidity.available_amount);
+```
 
 Impact mechanics:
 - Any overflow in the U256 arithmetic or downcast will trigger `.expect(...)` panics, aborting the transaction.
@@ -161,6 +195,7 @@ Realistic trigger:
 Blast radius:
 - Per‑tx DoS for deposit/redeem and routines using these conversions.
 - No state corruption; the transaction aborts.
+ - This affects not only direct user calls but also internal flows that compute conservative conversions (ceil/floor) for safety.
 
 Mitigations present:
 - Internal arithmetic uses checked U256 ops prior to the first `.expect`, but failure still panics.
