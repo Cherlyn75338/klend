@@ -430,6 +430,29 @@ pub fn post_transfer_vault_balance_liquidity_reserve_checks(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_substractive_signed_overflow_guard() {
+        // If initial balances exceed i64::MAX, casting to i64 will wrap; function must error.
+        let initial_vault: u64 = i64::MAX as u64 + 1;
+        let initial_available: u64 = 0;
+        let final_vault = initial_vault; // no change
+        let final_available = initial_available; // no change
+
+        let res = post_transfer_vault_balance_liquidity_reserve_checks(
+            final_vault,
+            final_available,
+            initial_vault,
+            initial_available,
+            LendingAction::SubstractiveSigned(0),
+        );
+        assert!(res.is_err());
+        assert_eq!(res.err().unwrap(), LendingError::MathOverflow.into());
+    }
+}
 pub fn post_liquidate_repay_amount_check(max_repay: u64, actual_repay: u64) -> Result<()> {
     require_gte!(
         max_repay,

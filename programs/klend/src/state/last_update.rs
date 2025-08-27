@@ -122,6 +122,23 @@ impl LastUpdate {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_price_status_flags_gating() {
+        let mut lu = LastUpdate::new(100);
+        // Update slot without setting price status (None)
+        lu.update_slot(101, None);
+        // In same slot, stale=false and slots_elapsed<1; but ALL_CHECKS should fail due to flags
+        assert!(lu.is_stale(101, PriceStatusFlags::ALL_CHECKS).unwrap());
+        // With NONE requirement, not stale
+        assert!(!lu.is_stale(101, PriceStatusFlags::NONE).unwrap());
+        // After one slot, stale due to slots_elapsed>=1
+        assert!(lu.is_stale(102, PriceStatusFlags::NONE).unwrap());
+    }
+}
 impl PartialEq for LastUpdate {
     fn eq(&self, other: &Self) -> bool {
         self.slot == other.slot
