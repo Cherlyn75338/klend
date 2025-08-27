@@ -1563,32 +1563,27 @@ mod tests {
         for amount in [1u64, 2, 3, 10, 99, 100, 1_000, 123_456] {
             let amount_f = Fraction::from_num(amount);
             // Exclusive
-            let (protocol, referral) = fees
-                .calculate_borrow_fees(
-                    amount_f,
-                    FeeCalculation::Exclusive,
-                    referral_bps,
-                    true,
-                )
-                .unwrap();
+            let result = fees.calculate_borrow_fees(
+                amount_f,
+                FeeCalculation::Exclusive,
+                referral_bps,
+                true,
+            );
+            if amount <= 1 {
+                // Minimum fee of 1 makes amount 1 too small after fees
+                assert!(result.is_err());
+                continue;
+            }
+            let (protocol, referral) = result.unwrap();
             let total_fee = protocol + referral;
             // Total fee should be close to 1% of amount (within 1 unit)
             let ideal = (amount_f * Fraction::from_bps(100)).to_round::<u64>();
-            let delta = if ideal > total_fee {
-                ideal - total_fee
-            } else {
-                total_fee - ideal
-            };
+            let delta = if ideal > total_fee { ideal - total_fee } else { total_fee - ideal };
             assert!(delta <= 1);
 
             // All referral when referral_bps == 10000
             let (protocol_full_ref, referral_full_ref) = fees
-                .calculate_borrow_fees(
-                    amount_f,
-                    FeeCalculation::Exclusive,
-                    10_000,
-                    true,
-                )
+                .calculate_borrow_fees(amount_f, FeeCalculation::Exclusive, 10_000, true)
                 .unwrap();
             assert_eq!(protocol_full_ref, 0);
             assert_eq!(referral_full_ref, total_fee);
