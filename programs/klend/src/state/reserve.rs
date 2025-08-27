@@ -1489,6 +1489,62 @@ pub fn approximate_compounded_interest(rate: Fraction, elapsed_slots: u64) -> Fr
 
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::fraction::FractionExtra as _;
+
+    #[test]
+    #[should_panic(expected = "collateral_to_liquidity_ceil: liquidity_amount overflow on calculation")]
+    fn panic_on_zero_supply_collateral_to_liquidity_ceil() {
+        // Construct an exchange rate with zero collateral supply to force a division-by-zero path
+        // in collateral_to_liquidity_ceil (checked_div returns None -> expect panics).
+        let rate = CollateralExchangeRate::from_supply_and_liquidity(0u64, Fraction::ONE);
+        let _ = rate.collateral_to_liquidity_ceil(1);
+    }
+
+    #[test]
+    fn net_new_variable_debt_is_non_negative_for_non_negative_rates() {
+        // Deterministic test cases: (variable_bps, fixed_bps, slots_elapsed)
+        let cases: &[(u16, u16, u64)] = &[
+            (0, 100, 1),
+            (10, 100, 10),
+            (0, 500, 1000),
+            (200, 300, 12345),
+            (1500, 0, 2),
+        ];
+
+        let previous_debt_f = Fraction::from(1_000_000u64);
+
+        for (var_bps, fixed_bps, slots) in cases.iter().copied() {
+            let current_borrow_rate = Fraction::from_bps(var_bps);
+            let host_fixed_interest_rate = Fraction::from_bps(fixed_bps);
+
+            let compounded_interest_rate =
+                approximate_compounded_interest(current_borrow_rate + host_fixed_interest_rate, slots);
+            let compounded_fixed_rate =
+                approximate_compounded_interest(host_fixed_interest_rate, slots);
+
+            let new_debt_f = previous_debt_f * compounded_interest_rate;
+            let fixed_host_fee = (previous_debt_f * compounded_fixed_rate)
+                .checked_sub(previous_debt_f)
+                .expect("fixed_host_fee underflow");
+
+            let delta_total = new_debt_f
+                .checked_sub(previous_debt_f)
+                .expect("new_debt underflow vs previous");
+
+            // net_new_variable_debt_f = (new_debt - previous) - fixed_host_fee
+            let net_new_variable_debt_f = delta_total
+                .checked_sub(fixed_host_fee)
+                .expect("net_new_variable_debt_f should be non-negative");
+
+            assert!(net_new_variable_debt_f >= Fraction::ZERO);
+        }
+    }
+}
+
+
 
 
 
