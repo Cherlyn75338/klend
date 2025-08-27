@@ -80,6 +80,35 @@ pub fn refresh_reserve(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{ReserveConfig, ReserveLiquidity, ReserveCollateral, InitReserveParams};
+
+    fn make_reserve_with_price(max_age_secs: u64, last_price_ts: u64) -> Reserve {
+        let mut reserve = Reserve::default();
+        let mut cfg = ReserveConfig::default();
+        cfg.token_info.max_age_price_seconds = max_age_secs;
+        reserve.config = cfg;
+        let mut liq = ReserveLiquidity::default();
+        liq.market_price_sf = Fraction::from_num(1u64).to_bits();
+        liq.market_price_last_updated_ts = last_price_ts;
+        reserve.liquidity = liq;
+        reserve
+    }
+
+    #[test]
+    fn test_is_saved_price_age_valid_threshold() {
+        let max_age = 100u64;
+        let now = 1_000u64;
+        let valid = make_reserve_with_price(max_age, now - 99);
+        assert!(is_saved_price_age_valid(&valid, now as i64));
+
+        let invalid = make_reserve_with_price(max_age, now - 100);
+        assert!(!is_saved_price_age_valid(&invalid, now as i64));
+    }
+}
+
 pub fn is_saved_price_age_valid(reserve: &Reserve, current_ts: clock::UnixTimestamp) -> bool {
     let current_ts: u64 = current_ts.try_into().expect("Negative timestamp");
     let price_last_updated_ts = reserve.liquidity.market_price_last_updated_ts;

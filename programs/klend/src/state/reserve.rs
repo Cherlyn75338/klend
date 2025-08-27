@@ -1486,6 +1486,111 @@ pub fn approximate_compounded_interest(rate: Fraction, elapsed_slots: u64) -> Fr
 
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compound_interest_monotonic_and_referral_bounds() {
+        // Setup a minimal ReserveLiquidity with some borrowed amount
+        let mut liq = ReserveLiquidity::default();
+        let previous_borrowed_f = Fraction::from_num(1_000_000u64);
+        liq.borrowed_amount_sf = previous_borrowed_f.to_bits();
+
+        let previous_protocol_fees_f = Fraction::from_bits(liq.accumulated_protocol_fees_sf);
+
+        // Rates and slots
+        let host_fixed_interest_rate = Fraction::from_bps(100); // 1%
+        let variable_interest_rate = Fraction::from_bps(200);   // 2%
+        let protocol_take_rate = Fraction::from_percent(20);    // 20%
+        let referral_rate = Fraction::from_bps(500);            // 5%
+        let slots_elapsed = 1_000u64;
+
+        // Call compounding
+        liq.compound_interest(
+            variable_interest_rate,
+            host_fixed_interest_rate,
+            slots_elapsed,
+            protocol_take_rate,
+            referral_rate,
+        )
+        .unwrap();
+
+        // Borrow should be non-decreasing
+        let new_borrowed_f = Fraction::from_bits(liq.borrowed_amount_sf);
+        assert!(new_borrowed_f >= previous_borrowed_f);
+
+        // Absolute referral rate must be <= protocol take rate
+        let absolute_referral_rate = Fraction::from_bits(liq.absolute_referral_rate_sf);
+        assert!(absolute_referral_rate <= protocol_take_rate);
+
+        // Protocol fees should not decrease
+        let new_protocol_fees_f = Fraction::from_bits(liq.accumulated_protocol_fees_sf);
+        assert!(new_protocol_fees_f >= previous_protocol_fees_f);
+
+        // Net new variable debt >= 0 and pending referrer fees == net_var * abs_referral_rate (within 1 unit rounding)
+        let comp_total = approximate_compounded_interest(
+            variable_interest_rate + host_fixed_interest_rate,
+            slots_elapsed,
+        );
+        let comp_fixed = approximate_compounded_interest(host_fixed_interest_rate, slots_elapsed);
+        let fixed_host_fee = previous_borrowed_f * comp_fixed - previous_borrowed_f;
+        let expected_new_borrowed_f = previous_borrowed_f * comp_total;
+        let net_new_variable = expected_new_borrowed_f - previous_borrowed_f - fixed_host_fee;
+        assert!(net_new_variable >= Fraction::ZERO);
+
+        let expected_pending = (net_new_variable * absolute_referral_rate).to_bits();
+        let actual_pending = liq.pending_referrer_fees_sf;
+        let diff = if expected_pending > actual_pending {
+            expected_pending - actual_pending
+        } else {
+            actual_pending - expected_pending
+        };
+        // Allow at most 1 unit of rounding drift
+        assert!(diff <= 1);
+    }
+
+    #[test]
+    fn test_reserve_fees_rounding_and_partition() {
+        // Borrow fee 1%, referral 5%
+        let fees = ReserveFees {
+            borrow_fee_sf: Fraction::from_bps(100).to_bits() as u64,
+            flash_loan_fee_sf: Fraction::from_bps(10).to_bits() as u64,
+            padding: [0; 8],
+        };
+
+        let referral_bps = 500u16;
+        for amount in [1u64, 2, 3, 10, 99, 100, 1_000, 123_456] {
+            let amount_f = Fraction::from_num(amount);
+            // Exclusive
+            let result = fees.calculate_borrow_fees(
+                amount_f,
+                FeeCalculation::Exclusive,
+                referral_bps,
+                true,
+            );
+            if amount <= 1 {
+                // Minimum fee of 1 makes amount 1 too small after fees
+                assert!(result.is_err());
+                continue;
+            }
+            let (protocol, referral) = result.unwrap();
+            let total_fee = protocol + referral;
+            // Total fee should be close to 1% of amount (within 1 unit)
+            let ideal = (amount_f * Fraction::from_bps(100)).to_round::<u64>();
+            let delta = if ideal > total_fee { ideal - total_fee } else { total_fee - ideal };
+            assert!(delta <= 1);
+
+            // All referral when referral_bps == 10000
+            let (protocol_full_ref, referral_full_ref) = fees
+                .calculate_borrow_fees(amount_f, FeeCalculation::Exclusive, 10_000, true)
+                .unwrap();
+            assert_eq!(protocol_full_ref, 0);
+            assert_eq!(referral_full_ref, total_fee);
+        }
+    }
+}
+
 
 
 
