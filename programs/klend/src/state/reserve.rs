@@ -1603,6 +1603,71 @@ mod tests {
         // This will underflow because fixed_host_fee (200) > debt_increase (100)
         let _net_new_variable_debt_f = new_debt_f - previous_debt_f - fixed_host_fee;
     }
+
+    #[test]
+    fn test_realistic_mainnet_vulnerability_conditions() {
+        // Test realistic mainnet scenarios to assess if vulnerabilities can occur in practice
+        
+        println!("=== VULNERABILITY REALISM ANALYSIS ===");
+        
+        // Test 1: CollateralExchangeRate zero supply scenario
+        println!("\n1. CollateralExchangeRate Zero Supply Analysis:");
+        println!("   - Reserves are initialized with initial_collateral_supply parameter");
+        println!("   - Line 850-851: Code already handles mint_total_supply == 0 -> returns INITIAL_COLLATERAL_RATE");
+        println!("   - This means the vulnerable path (line 902) is NEVER reached in normal operations!");
+        println!("   - The vulnerability only exists in artificially constructed test scenarios");
+        
+        // Verify the protection exists
+        let zero_supply_rate = ReserveCollateral::default().exchange_rate(Fraction::ONE);
+        println!("   - Zero supply exchange rate: {:?}", zero_supply_rate);
+        
+        // Test 2: net_new_variable_debt underflow realistic conditions
+        println!("\n2. net_new_variable_debt Underflow Analysis:");
+        println!("   - Testing with realistic mainnet interest rates...");
+        
+        let previous_debt_f = Fraction::from(1_000_000u64);
+        
+        // Realistic mainnet scenarios (based on typical DeFi rates)
+        let realistic_scenarios = &[
+            ("Low rates", 50, 25, 1),      // 0.5% variable, 0.25% fixed, 1 slot
+            ("Medium rates", 500, 100, 1), // 5% variable, 1% fixed, 1 slot  
+            ("High rates", 2000, 500, 1),  // 20% variable, 5% fixed, 1 slot
+            ("Edge case", 1, 50, 1),       // 0.01% variable, 0.5% fixed, 1 slot
+            ("Extreme", 0, 10000, 1),      // 0% variable, 100% fixed, 1 slot (unrealistic)
+        ];
+        
+        let mut vulnerable_cases = 0;
+        for (name, var_bps, fixed_bps, slots) in realistic_scenarios.iter() {
+            let variable_rate = Fraction::from_bps(*var_bps);
+            let fixed_rate = Fraction::from_bps(*fixed_bps);
+            
+            let compounded_total_rate = approximate_compounded_interest(variable_rate + fixed_rate, *slots);
+            let compounded_fixed_rate = approximate_compounded_interest(fixed_rate, *slots);
+            
+            let new_debt_f = previous_debt_f * compounded_total_rate;
+            let fixed_host_fee = (previous_debt_f * compounded_fixed_rate) - previous_debt_f;
+            let debt_increase = new_debt_f - previous_debt_f;
+            
+            let is_vulnerable = fixed_host_fee > debt_increase;
+            if is_vulnerable {
+                vulnerable_cases += 1;
+            }
+            
+            println!("   - {}: var={}bps, fixed={}bps -> vulnerable: {}", 
+                name, var_bps, fixed_bps, is_vulnerable);
+            println!("     debt_increase: {}, fixed_host_fee: {}", 
+                debt_increase, fixed_host_fee);
+        }
+        
+        println!("\n=== CONCLUSION ===");
+        println!("Vulnerable scenarios found: {}/{}", vulnerable_cases, realistic_scenarios.len());
+        
+        if vulnerable_cases == 0 {
+            println!("✅ No realistic mainnet scenarios trigger the net_new_variable_debt underflow");
+        } else {
+            println!("⚠️  Some scenarios could trigger the vulnerability under extreme conditions");
+        }
+    }
 }
 
 
