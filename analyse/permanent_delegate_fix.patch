@@ -1,0 +1,45 @@
+diff --git a/programs/klend/src/utils/constraints.rs b/programs/klend/src/utils/constraints.rs
+index 1234567..abcdefg 100644
+--- a/programs/klend/src/utils/constraints.rs
++++ b/programs/klend/src/utils/constraints.rs
+@@ -44,11 +44,13 @@ pub mod token_2022 {
+     const VALID_LIQUIDITY_TOKEN_EXTENSIONS: &[ExtensionType] = &[
+         ExtensionType::ConfidentialTransferFeeConfig,
+         ExtensionType::ConfidentialTransferMint,
+         ExtensionType::MintCloseAuthority,
+         ExtensionType::MetadataPointer,
+-        ExtensionType::PermanentDelegate,
++        // SECURITY: PermanentDelegate is explicitly DISALLOWED
++        // It would allow bypassing PDA authority and draining vaults
++        // ExtensionType::PermanentDelegate,  // REMOVED - CRITICAL SECURITY FIX
+         ExtensionType::TransferFeeConfig,
+         ExtensionType::TokenMetadata,
+         ExtensionType::TransferHook,
+         ExtensionType::DefaultAccountState,
+         ExtensionType::ScaledUiAmount,
+@@ -157,10 +159,24 @@ pub mod token_2022 {
+                         return err!(LendingError::UnsupportedTokenExtension);
+                     }
+                 }
++                // This case should never be reached since PermanentDelegate is not in VALID_LIQUIDITY_TOKEN_EXTENSIONS
++                // But we add explicit check as defense in depth
++                ExtensionType::PermanentDelegate => {
++                    xmsg!(
++                        "PermanentDelegate extension is explicitly forbidden for liquidity tokens due to security risks"
++                    );
++                    return err!(LendingError::UnsupportedTokenExtension);
++                }
+                 _ => {}
+             }
+         }
++        
++        // Additional safety check: Ensure no PermanentDelegate even if not in extension list
++        // This is redundant but provides defense in depth
++        if mint.get_extension_types()?.contains(&ExtensionType::PermanentDelegate) {
++            xmsg!("Security violation: PermanentDelegate extension detected on liquidity mint");
++            return err!(LendingError::UnsupportedTokenExtension);
++        }
++        
+         Ok(())
+     }
+ }
