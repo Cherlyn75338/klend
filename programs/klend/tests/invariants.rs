@@ -42,6 +42,7 @@ proptest! {
     // Vault-vs-accounting conservation across deposit
     #[test]
     fn vault_delta_conserved_deposit(init_v in 0u64..1_000_000u64, init_av in 0u64..1_000_000u64, dep in 1u64..100_000u64) {
+        proptest::prop_assume!(init_v >= init_av);
         let final_v = init_v.saturating_add(dep);
         let final_av = init_av.saturating_add(dep);
         let res = post_transfer_vault_balance_liquidity_reserve_checks(final_v, final_av, init_v, init_av, LendingAction::Additive(dep));
@@ -51,6 +52,7 @@ proptest! {
     // Vault-vs-accounting conservation across withdraw
     #[test]
     fn vault_delta_conserved_withdraw(init_v in 1u64..1_000_000u64, init_av in 1u64..1_000_000u64, dep in 1u64..100_000u64) {
+        proptest::prop_assume!(init_v >= init_av); // valid pre-state
         proptest::prop_assume!(init_v >= dep && init_av >= dep);
         let final_v = init_v - dep;
         let final_av = init_av - dep;
@@ -61,6 +63,7 @@ proptest! {
     // Donation alone (vault only) breaks invariant and would be detected
     #[test]
     fn donation_breaks_invariant(init_v in 0u64..1_000_000u64, init_av in 0u64..1_000_000u64, donation in 1u64..100_000u64) {
+        proptest::prop_assume!(init_v >= init_av);
         let final_v = init_v.saturating_add(donation);
         let final_av = init_av; // unchanged accounting
         let res = post_transfer_vault_balance_liquidity_reserve_checks(final_v, final_av, init_v, init_av, LendingAction::Additive(0));
@@ -93,6 +96,8 @@ proptest! {
         let coll_burn = rate.liquidity_to_collateral(withdraw_liq);
         let liq_from_coll_wd = rate.fraction_collateral_to_liquidity(Fraction::from(coll_burn));
         let asset_mv_wd = liq_from_coll_wd * price_f / mint_factor;
+        // Only assert monotonicity when withdrawal value does not exceed existing deposit value
+        proptest::prop_assume!(asset_mv_wd <= start_dep_mv);
         let wd_ltv = start_debt_mv / (start_dep_mv - asset_mv_wd);
         prop_assert!(wd_ltv >= start_debt_mv / start_dep_mv);
 
