@@ -7,3 +7,4 @@
 cc 0496e449b073f9b392f7893e916b09a693d3440272915248bf0841222b37d168 # shrinks to init_v = 0, init_av = 1, donation = 1
 cc ea5f7d601536782ca4b3189536282dd0fe24a5301fe3c11f8a13f7dc1b45fd8d # shrinks to init_v = 0, init_av = 1, dep = 1
 cc 39dc4e90df2c864ba980b9f929e548c7af575991aff72d0d4d518ce7214760a7 # shrinks to price = 1, dec = 0, available = 1, deposit_liq = 1, withdraw_liq = 2
+cc 0de515fab82a131c76a198d9e48cf01d652545d78d6068b1858b5ad14d42b8da # shrinks to price = 1, dec = 2, available = 1, deposit_liq = 1, withdraw_liq = 1

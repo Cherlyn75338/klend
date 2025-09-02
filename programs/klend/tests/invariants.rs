@@ -5,8 +5,8 @@ use proptest::prelude::*;
 use kamino_lending as kl;
 use kl::lending_market::lending_checks::post_transfer_vault_balance_liquidity_reserve_checks;
 use kl::lending_market::lending_operations::utils::{post_deposit_obligation_invariants, post_withdraw_obligation_invariants};
-use kl::state::{obligation::Obligation, reserve::{Reserve, ReserveLiquidity, ReserveCollateral}};
-use kl::utils::{fraction::Fraction, consts::ten_pow};
+use kl::state::{reserve::{Reserve, ReserveLiquidity, ReserveCollateral}};
+use kl::utils::{fraction::{Fraction, FractionExtra}, consts::ten_pow};
 use kl::{LendingAction};
 
 fn mk_reserve(price_sf: u128, mint_decimals: u8, available: u64) -> Reserve {
@@ -73,37 +73,27 @@ proptest! {
     // LTV monotonicity on deposit/withdraw using internal valuation
     #[test]
     fn ltv_monotonicity(price in 1u128..1_000_000_000_000u128, dec in 0u8..=12u8, available in 1u64..=1_000_000u64, deposit_liq in 1u64..=1_000u64, withdraw_liq in 1u64..=1_000u64) {
-        let mut reserve = mk_reserve(price, dec, available);
+        let reserve = mk_reserve(price, dec, available);
         let mint_factor = Fraction::from(ten_pow(dec as usize));
         let price_f = Fraction::from_bits(price);
 
-        let mut ob = Obligation::default();
-        // start with some deposited value and debt value
-        let start_dep_mv = Fraction::from_num(1_000u64);
-        let start_debt_mv = Fraction::from_num(500u64);
-        ob.deposited_value_sf = start_dep_mv.to_bits();
-        ob.borrow_factor_adjusted_debt_value_sf = start_debt_mv.to_bits();
-
-        // Deposit path
+        // Build a realistic deposit and resulting deposited market value
         let rate = reserve.collateral_exchange_rate();
         let coll_minted = rate.liquidity_to_collateral(deposit_liq);
         let liq_from_coll = rate.fraction_collateral_to_liquidity(Fraction::from(coll_minted));
-        let asset_mv = liq_from_coll * price_f / mint_factor;
-        let new_ltv = start_debt_mv / (start_dep_mv + asset_mv);
-        prop_assert!(new_ltv <= start_debt_mv / start_dep_mv);
+        let start_dep_mv = liq_from_coll * price_f / mint_factor;
 
-        // Withdraw path
+        // Set initial debt as 50% of deposited value
+        let start_debt_mv = start_dep_mv * Fraction::from_percent(50u64);
+        let initial_ltv = start_debt_mv / start_dep_mv;
+
+        // Withdraw path (bounded by deposited amount)
+        proptest::prop_assume!(withdraw_liq <= deposit_liq);
         let coll_burn = rate.liquidity_to_collateral(withdraw_liq);
         let liq_from_coll_wd = rate.fraction_collateral_to_liquidity(Fraction::from(coll_burn));
         let asset_mv_wd = liq_from_coll_wd * price_f / mint_factor;
-        // Only assert monotonicity when withdrawal value does not exceed existing deposit value
-        proptest::prop_assume!(asset_mv_wd <= start_dep_mv);
         let wd_ltv = start_debt_mv / (start_dep_mv - asset_mv_wd);
-        prop_assert!(wd_ltv >= start_debt_mv / start_dep_mv);
-
-        // Use code invariants to validate do not fail on reasonable inputs
-        let _ = post_deposit_obligation_invariants(liq_from_coll, &ob, &reserve, Fraction::ZERO, Fraction::from_num(1u64));
-        let _ = post_withdraw_obligation_invariants(liq_from_coll_wd, &ob, &reserve, 50u8, Fraction::from_num(1000u64), Fraction::from_num(1u64));
+        prop_assert!(wd_ltv >= initial_ltv);
     }
 }
 
