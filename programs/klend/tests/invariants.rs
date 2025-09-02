@@ -6,7 +6,7 @@ use kamino_lending as kl;
 use kl::lending_market::lending_checks::post_transfer_vault_balance_liquidity_reserve_checks;
 use kl::lending_market::lending_operations::utils::{post_deposit_obligation_invariants, post_withdraw_obligation_invariants};
 use kl::state::{obligation::Obligation, reserve::{Reserve, ReserveLiquidity, ReserveCollateral}};
-use kl::utils::{fraction::{Fraction, FractionExtra}, consts::ten_pow};
+use kl::utils::{fraction::Fraction, consts::ten_pow};
 use kl::{LendingAction};
 
 fn mk_reserve(price_sf: u128, mint_decimals: u8, available: u64) -> Reserve {
@@ -50,7 +50,8 @@ proptest! {
 
     // Vault-vs-accounting conservation across withdraw
     #[test]
-    fn vault_delta_conserved_withdraw(init_v in dep..1_000_000u64, init_av in dep..1_000_000u64, dep in 1u64..100_000u64) {
+    fn vault_delta_conserved_withdraw(init_v in 1u64..1_000_000u64, init_av in 1u64..1_000_000u64, dep in 1u64..100_000u64) {
+        proptest::prop_assume!(init_v >= dep && init_av >= dep);
         let final_v = init_v - dep;
         let final_av = init_av - dep;
         let res = post_transfer_vault_balance_liquidity_reserve_checks(final_v, final_av, init_v, init_av, LendingAction::Subtractive(dep));
@@ -114,7 +115,8 @@ fn decimals_rounding_leq_one_wei() {
             let c = rate.liquidity_to_collateral(liq);
             let mv = Fraction::from(liq) * price / mint_factor;
             let mv_back = Fraction::from(rate.collateral_to_liquidity(c)) * price / mint_factor;
-            let diff = (mv_back - mv).abs();
+            let (hi, lo) = if mv_back > mv { (mv_back, mv) } else { (mv, mv_back) };
+            let diff = hi - lo;
             assert!(diff <= Fraction::from_num(1u64));
         }
     }
